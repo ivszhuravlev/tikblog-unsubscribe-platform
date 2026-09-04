@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tikblog-platform"
+version = "0.1.0"
+description = "Production-oriented unsubscribe processing platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.40,<2",
+    "confluent-kafka[avro,schemaregistry]>=2.15,<3",
+    "fastapi>=0.116,<1",
+    "httpx>=0.28,<1",
+    "psycopg[binary,pool]>=3.2,<4",
+    "pydantic-settings>=2.10,<3",
+    "pyyaml>=6.0,<7",
+    "uvicorn[standard]>=0.35,<1",
+]
+
+[dependency-groups]
+dev = [
+    # boto3 ships no type information of its own; mypy strict needs the stubs.
+    "boto3-stubs[s3]>=1.40,<2",
+    "mypy>=1.17,<2",
+    "pytest>=8.4,<9",
+    "pytest-cov>=6.2,<7",
+    "ruff>=0.12,<1",
+    "types-pyyaml>=6.0.12",
+]
+
+[tool.setuptools.packages.find]
+where = ["libs"]
+
+[tool.setuptools.package-data]
+contracts = ["*.avsc", "py.typed"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers -q"
+testpaths = ["tests"]
+# Services are not installed packages: tests import them from their source tree.
+pythonpath = [
+    "services/event-producers",
+    "services/legal-ingestion",
+    "services/unsubscribe-consumer",
+    "services/unsubscribeme",
+]
+markers = ["integration: needs the local stack from infra/docker-compose.yml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["libs", "services", "tests"]
+exclude = ["services/.*/build/"]

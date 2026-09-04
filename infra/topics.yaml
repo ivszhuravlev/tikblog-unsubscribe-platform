@@ -1,0 +1,16 @@
+topics:
+  - name: unsubscribe-priority
+    partitions: 3
+    replication_factor: 3
+    config:
+      retention.ms: 604800000
+      # acks=all is only as strong as this number: with 1 the leader could
+      # answer alone and lose an acknowledged unsubscribe. 2 of 3 replicas
+      # survives one broker without stopping the producers.
+      min.insync.replicas: 2
+  - name: unsubscribe-legal
+    partitions: 3
+    replication_factor: 3
+    config:
+      retention.ms: 604800000
+      min.insync.replicas: 2

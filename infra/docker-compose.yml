@@ -1,0 +1,425 @@
+name: tikblog-platform
+
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    restart: unless-stopped
+    ports:
+      - "${KAFKA_HOST_PORT:-9092}:9092"
+    environment:
+      CLUSTER_ID: "${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}"
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:29093,PLAINTEXT://:29092,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093,2@kafka-2:29093,3@kafka-3:29093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "${KAFKA_MIN_IN_SYNC_REPLICAS:-2}"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      KAFKA_MIN_INSYNC_REPLICAS: "${KAFKA_MIN_IN_SYNC_REPLICAS:-2}"
+      KAFKA_NUM_PARTITIONS: "${KAFKA_TOPIC_PARTITIONS:-3}"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: "false"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    volumes:
+      - kafka-1-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  kafka-2:
+    image: apache/kafka:3.9.1
+    restart: unless-stopped
+    ports:
+      - "${KAFKA_2_HOST_PORT:-9093}:9092"
+    environment:
+      CLUSTER_ID: "${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}"
+      KAFKA_NODE_ID: "2"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:29093,PLAINTEXT://:29092,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093,2@kafka-2:29093,3@kafka-3:29093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "${KAFKA_MIN_IN_SYNC_REPLICAS:-2}"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      KAFKA_MIN_INSYNC_REPLICAS: "${KAFKA_MIN_IN_SYNC_REPLICAS:-2}"
+      KAFKA_NUM_PARTITIONS: "${KAFKA_TOPIC_PARTITIONS:-3}"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: "false"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    volumes:
+      - kafka-2-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  kafka-3:
+    image: apache/kafka:3.9.1
+    restart: unless-stopped
+    ports:
+      - "${KAFKA_3_HOST_PORT:-9094}:9092"
+    environment:
+      CLUSTER_ID: "${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}"
+      KAFKA_NODE_ID: "3"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: CONTROLLER://:29093,PLAINTEXT://:29092,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093,2@kafka-2:29093,3@kafka-3:29093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "${KAFKA_MIN_IN_SYNC_REPLICAS:-2}"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      KAFKA_MIN_INSYNC_REPLICAS: "${KAFKA_MIN_IN_SYNC_REPLICAS:-2}"
+      KAFKA_NUM_PARTITIONS: "${KAFKA_TOPIC_PARTITIONS:-3}"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: "false"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    volumes:
+      - kafka-3-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.9.1
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    ports:
+      - "${SCHEMA_REGISTRY_HOST_PORT:-8081}:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092,PLAINTEXT://kafka-2:29092,PLAINTEXT://kafka-3:29092
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: "${KAFKA_REPLICATION_FACTOR:-3}"
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/subjects >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  kafka-ui:
+    # Read-only browser for brokers, topics, partitions and Avro messages.
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    ports:
+      - "${KAFKA_UI_HOST_PORT:-8082}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: tikblog-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092,kafka-2:29092,kafka-3:29092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      KAFKA_CLUSTERS_0_DEFAULTKEYSERDE: String
+      KAFKA_CLUSTERS_0_DEFAULTVALUESERDE: SchemaRegistry
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRYSHOWNULLVALUES: "true"
+      KAFKA_CLUSTERS_0_READONLY: "true"
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-tikblog}"
+      POSTGRES_USER: "${POSTGRES_USER:-tikblog}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-tikblog-local}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  db-migrate:
+    # Applies infra/migrations/*.sql in name order and exits. Runs on every
+    # `up`, not only on a fresh volume, so the schema of a long-lived stand
+    # stays current; every migration is written to be safe to re-apply.
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGDATABASE: "${POSTGRES_DB:-tikblog}"
+      PGUSER: "${POSTGRES_USER:-tikblog}"
+      PGPASSWORD: "${POSTGRES_PASSWORD:-tikblog-local}"
+    volumes:
+      - ./migrations:/migrations:ro
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        for file in /migrations/*.sql; do
+          echo "applying $$file"
+          psql --set ON_ERROR_STOP=1 -f "$$file"
+        done
+        echo "migrations applied"
+
+  minio:
+    # Local object storage for Legal CSV files.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_HOST_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-tikblog}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-tikblog-local}"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  minio-init:
+    # Creates the bucket once and exits, so the stand comes up with one command
+    # and no manual click in the console. Idempotent on purpose: --ignore-existing
+    # makes a second `up` a no-op instead of an error.
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-tikblog}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-tikblog-local}"
+      LEGAL_BUCKET: "${LEGAL_BUCKET:-tikblog-legal}"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$LEGAL_BUCKET"
+        echo "bucket ready: $$LEGAL_BUCKET"
+
+  ui-producer:
+    build:
+      context: ..
+      dockerfile: services/event-producers/Dockerfile
+    restart: unless-stopped
+    # Must stay above EVENT_PRODUCERS_FLUSH_TIMEOUT_SECONDS, otherwise
+    # SIGKILL arrives in the middle of the flush and the shutdown counters lie.
+    stop_grace_period: 30s
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    environment:
+      EVENT_PRODUCERS_SERVICE_NAME: ui-producer
+      EVENT_PRODUCERS_ROLE: UI
+      EVENT_PRODUCERS_BOOTSTRAP_SERVERS: kafka:29092,kafka-2:29092,kafka-3:29092
+      EVENT_PRODUCERS_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      EVENT_PRODUCERS_TOPIC: "${PRIORITY_TOPIC:-unsubscribe-priority}"
+      EVENT_PRODUCERS_EVENTS_PER_SECOND: "${UI_EVENTS_PER_SECOND:-100}"
+      EVENT_PRODUCERS_USER_POOL_SIZE: "${USER_POOL_SIZE:-10000}"
+      EVENT_PRODUCERS_WRITER_POOL_SIZE: "${WRITER_POOL_SIZE:-500}"
+      EVENT_PRODUCERS_RANDOM_SEED: "1"
+      EVENT_PRODUCERS_TECHNICAL_DUPLICATE_PROBABILITY: "${TECHNICAL_DUPLICATE_PROBABILITY:-0.001}"
+      EVENT_PRODUCERS_MEANINGLESS_EVENT_PROBABILITY: "${MEANINGLESS_EVENT_PROBABILITY:-0}"
+      EVENT_PRODUCERS_GARBAGE_BYTES_PROBABILITY: "${GARBAGE_BYTES_PROBABILITY:-0}"
+
+  cs-producer:
+    build:
+      context: ..
+      dockerfile: services/event-producers/Dockerfile
+    restart: unless-stopped
+    # Must stay above EVENT_PRODUCERS_FLUSH_TIMEOUT_SECONDS, otherwise
+    # SIGKILL arrives in the middle of the flush and the shutdown counters lie.
+    stop_grace_period: 30s
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    environment:
+      EVENT_PRODUCERS_SERVICE_NAME: cs-producer
+      EVENT_PRODUCERS_ROLE: CUSTOMER_SUCCESS
+      EVENT_PRODUCERS_BOOTSTRAP_SERVERS: kafka:29092,kafka-2:29092,kafka-3:29092
+      EVENT_PRODUCERS_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      EVENT_PRODUCERS_TOPIC: "${PRIORITY_TOPIC:-unsubscribe-priority}"
+      EVENT_PRODUCERS_EVENTS_PER_SECOND: "${CS_EVENTS_PER_SECOND:-1}"
+      EVENT_PRODUCERS_USER_POOL_SIZE: "${USER_POOL_SIZE:-10000}"
+      EVENT_PRODUCERS_WRITER_POOL_SIZE: "${WRITER_POOL_SIZE:-500}"
+      EVENT_PRODUCERS_RANDOM_SEED: "2"
+      EVENT_PRODUCERS_TECHNICAL_DUPLICATE_PROBABILITY: "${TECHNICAL_DUPLICATE_PROBABILITY:-0.001}"
+      EVENT_PRODUCERS_MEANINGLESS_EVENT_PROBABILITY: "${MEANINGLESS_EVENT_PROBABILITY:-0}"
+      EVENT_PRODUCERS_GARBAGE_BYTES_PROBABILITY: "${GARBAGE_BYTES_PROBABILITY:-0}"
+
+  legal-ingestion:
+    # A job, not a daemon: it drains the inbox and exits, so it sits behind a
+    # profile and `up -d` never starts it. Run one pass explicitly:
+    #   docker compose -f infra/docker-compose.yml run --rm legal-ingestion
+    profiles: ["jobs"]
+    build:
+      context: ..
+      dockerfile: services/legal-ingestion/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      LEGAL_INGESTION_BOOTSTRAP_SERVERS: kafka:29092,kafka-2:29092,kafka-3:29092
+      LEGAL_INGESTION_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      LEGAL_INGESTION_TOPIC: "${LEGAL_TOPIC:-unsubscribe-legal}"
+      # The same local MinIO bucket that the generator writes into.
+      LEGAL_INGESTION_ENDPOINT_URL: http://minio:9000
+      LEGAL_INGESTION_BUCKET: "${LEGAL_BUCKET:-tikblog-legal}"
+      LEGAL_INGESTION_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-tikblog}"
+      LEGAL_INGESTION_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:-tikblog-local}"
+      # Spelled out rather than left to the defaults in the code: the generator
+      # on the host and this job have to agree on where the batches are, and
+      # agreeing by accident is how a batch "disappears".
+      LEGAL_INGESTION_INBOX_PREFIX: "${LEGAL_INBOX_PREFIX:-legal_inbox/}"
+      LEGAL_INGESTION_PROCESSED_PREFIX: "${LEGAL_PROCESSED_PREFIX:-legal_processed/}"
+      LEGAL_INGESTION_REJECTS_PREFIX: "${LEGAL_REJECTS_PREFIX:-legal_rejects/}"
+
+  unsubscribeme:
+    # The stub of the external subscription service. Business idempotency lives
+    # here, in Postgres, not in Kafka and not in the consumer.
+    build:
+      context: ..
+      dockerfile: services/unsubscribeme/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${UNSUBSCRIBEME_HOST_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    environment:
+      UNSUBSCRIBEME_POSTGRES_HOST: postgres
+      UNSUBSCRIBEME_POSTGRES_DB: "${POSTGRES_DB:-tikblog}"
+      UNSUBSCRIBEME_POSTGRES_USER: "${POSTGRES_USER:-tikblog}"
+      UNSUBSCRIBEME_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-tikblog-local}"
+      # Fault injection for step 7. Off by default.
+      UNSUBSCRIBEME_FAILURE_RATE: "${UNSUBSCRIBEME_FAILURE_RATE:-0}"
+      UNSUBSCRIBEME_LATENCY_MS: "${UNSUBSCRIBEME_LATENCY_MS:-0}"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health', timeout=2).status == 200 else 1)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  priority-consumer:
+    # Same image and same handler as legal-consumer; only the topic and the
+    # group differ. Two deployments because the SLA differs, not the logic.
+    build:
+      context: ..
+      dockerfile: services/unsubscribe-consumer/Dockerfile
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      unsubscribeme:
+        condition: service_healthy
+    environment:
+      UNSUBSCRIBE_CONSUMER_SERVICE_NAME: priority-consumer
+      UNSUBSCRIBE_CONSUMER_BOOTSTRAP_SERVERS: kafka:29092,kafka-2:29092,kafka-3:29092
+      UNSUBSCRIBE_CONSUMER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      UNSUBSCRIBE_CONSUMER_TOPIC: "${PRIORITY_TOPIC:-unsubscribe-priority}"
+      UNSUBSCRIBE_CONSUMER_GROUP_ID: "${PRIORITY_GROUP_ID:-unsubscribe-priority-consumer}"
+      UNSUBSCRIBE_CONSUMER_UNSUBSCRIBEME_URL: http://unsubscribeme:8080
+
+  legal-consumer:
+    build:
+      context: ..
+      dockerfile: services/unsubscribe-consumer/Dockerfile
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      unsubscribeme:
+        condition: service_healthy
+    environment:
+      UNSUBSCRIBE_CONSUMER_SERVICE_NAME: legal-consumer
+      UNSUBSCRIBE_CONSUMER_BOOTSTRAP_SERVERS: kafka:29092,kafka-2:29092,kafka-3:29092
+      UNSUBSCRIBE_CONSUMER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      UNSUBSCRIBE_CONSUMER_TOPIC: "${LEGAL_TOPIC:-unsubscribe-legal}"
+      UNSUBSCRIBE_CONSUMER_GROUP_ID: "${LEGAL_GROUP_ID:-unsubscribe-legal-consumer}"
+      UNSUBSCRIBE_CONSUMER_UNSUBSCRIBEME_URL: http://unsubscribeme:8080
+
+volumes:
+  minio-data:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:
+  postgres-data:

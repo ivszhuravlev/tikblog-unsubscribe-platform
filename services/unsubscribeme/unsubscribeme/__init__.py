@@ -1,0 +1,1 @@
+"""Idempotent UnsubscribeMe HTTP service."""

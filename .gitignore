@@ -1,0 +1,42 @@
+# LLM files
+CLAUDE.md
+.claude
+
+# Local project notes and learning files
+README.md
+docs/
+tests/
+plan.md
+tikblog-operational-architecture.md
+tikblog-operational-streaming.md
+
+# Local configuration and operating-system files
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+wheels/
+*.egg-info
+libs/*.egg-info/
+
+# Virtual environments
+.venv/
+
+# Local service data (keep directory placeholders)
+data/legal_inbox/*
+!data/legal_inbox/.gitkeep
+data/legal_processed/*
+!data/legal_processed/.gitkeep
+data/legal_rejects/*
+!data/legal_rejects/.gitkeep

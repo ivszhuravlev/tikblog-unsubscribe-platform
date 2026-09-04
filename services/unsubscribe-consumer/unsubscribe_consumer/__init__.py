@@ -1,0 +1,1 @@
+"""Kafka unsubscribe consumer service."""

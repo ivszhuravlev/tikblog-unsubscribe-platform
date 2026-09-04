@@ -1,0 +1,1 @@
+"""Legal batch ingestion service."""

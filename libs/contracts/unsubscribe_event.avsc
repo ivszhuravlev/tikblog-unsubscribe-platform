@@ -1,0 +1,50 @@
+{
+  "type": "record",
+  "name": "UnsubscribeEvent",
+  "namespace": "com.tikblog.contracts",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string"
+    },
+    {
+      "name": "user_id",
+      "type": "string"
+    },
+    {
+      "name": "writer_id",
+      "type": "string"
+    },
+    {
+      "name": "source",
+      "type": {
+        "type": "enum",
+        "name": "UnsubscribeSource",
+        "symbols": ["UI", "CUSTOMER_SUCCESS", "LEGAL"]
+      }
+    },
+    {
+      "name": "requested_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "request_id",
+      "type": "string"
+    },
+    {
+      "name": "cs_agent_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Customer Success agent that initiated the unsubscribe"
+    },
+    {
+      "name": "legal_batch_id",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Legal batch from which the unsubscribe request originated"
+    }
+  ]
+}
