@@ -1,98 +1,133 @@
 # Unsubscribe Platform
 
-When a reader unsubscribes from a writer on a blogging platform, that request has
-to reach an external subscription service quickly, and it has to survive
-everything that can go wrong on the way: duplicate clicks, retries, malformed
-input, an unavailable downstream service.
+TikBlog is a blogging platform where readers subscribe to writers and can
+unsubscribe again. Unsubscribe requests arrive from three sources:
 
-This repository implements that path end to end, locally, with three sources of
-unsubscribe requests and one delivery guarantee that holds for all of them.
+- the reader-facing UI;
+- Customer Success, acting on behalf of a reader;
+- Legal, which submits unsubscribe requests in batches.
 
-**The problem in one line:** the same business event arrives from three very
-different places, with different volumes and different latency expectations, and
-must end up applied exactly once in effect — never lost, never applied twice.
+The platform has three requirements:
+
+1. A UI unsubscribe must reach the external UnsubscribeMe service in near real time.
+2. Unsubscribe activity must be available for management reporting and historical analysis.
+3. The data must support ad-hoc analytical queries later on.
 
 | Source | Shape | Latency expectation |
 |---|---|---|
 | Unsubscribe UI | continuous stream, one event per click | near real time |
-| Customer Success | rare, an agent acting for the user | near real time |
+| Customer Success | rare, an agent acting for the reader | near real time |
 | Legal | a CSV batch, up to millions of rows | best effort |
 
-**Analytical plane: TBD.** Dashboards and ad-hoc analysis are out of scope for
-now. The two Kafka topics are the intended entry point for them, which is why
-events stay on the topics rather than existing only as database state.
+This repository implements the operational unsubscribe path end to end, and the
+analytical platform built on top of the same events.
 
 ---
 
-## Architecture
+## High-level architecture
+
+Two planes over one stream of events. The operational plane applies unsubscribes;
+the analytical plane turns the same events into reporting.
 
 ```mermaid
 flowchart LR
-    UI[UI producer] --> P[unsubscribe-priority]
-    CS[CS producer] --> P
-    F[(MinIO<br/>legal_inbox)] --> LI[legal-ingestion] --> L[unsubscribe-legal]
-    LI -.rejected rows.-> R[(MinIO<br/>legal_rejects)]
+    UI[UI] --> PK[Priority Kafka]
+    CS[Customer Success] --> PK
+    LF[(Legal CSV)] --> LI[Legal ingestion] --> LK[Legal Kafka]
 
-    P --> PC[priority-consumer]
-    L --> LC[legal-consumer]
+    PK --> OP[Operational plane]
+    LK --> OP
+    OP --> UM[UnsubscribeMe]
 
-    PC --> U[UnsubscribeMe]
-    LC --> U
-    U --> DB[(Postgres<br/>subscription)]
+    PK -.-> AN[Analytics plane]
+    LK -.-> AN
+    AN -.-> DL[(Delta Lake)] -.-> DSH[Dashboards]
 
-    PC -.failed.-> D1[unsubscribe-priority.dlq]
-    LC -.failed.-> D2[unsubscribe-legal.dlq]
+    class AN,DL,DSH planned
+    classDef planned fill:#fff,stroke:#999,stroke-dasharray:4 3,color:#666
 ```
 
-**Why two topics.** UI and Customer Success need near-real-time delivery; a Legal
-batch of a million rows does not. On a shared topic that batch would sit in front
-of a fresh UI click and break its latency. Separate topics and separate consumer
-groups give fault isolation (a poisoned Legal batch cannot stall the UI path),
-independent scaling, and independent tuning.
-
-**Why the business logic is shared.** The two consumers are the same image with
-different environment variables. The delivery guarantee differs between the
-paths; the meaning of "unsubscribe" does not.
-
-**Where idempotency lives.** Not in Kafka, and not in the consumer: in
-UnsubscribeMe's own database, as an UPSERT on `(user_id, writer_id)`. A repeat of
-the same event, or an independent request from another source, converges to the
-same row and preserves the first `unsubscribed_at`.
-
-**Delivery semantics.** At-least-once, end to end. The final side effect is an
-HTTP call to an external service, which no Kafka transaction can cover, so the
-consumer commits its offset only after the call succeeds. A crash in between
-replays one event into an idempotent endpoint; the reverse order could silently
-drop a consent record.
-
-Full reasoning, with the alternatives that were rejected, is in
-[`docs/decisions.md`](docs/decisions.md).
+Solid lines run today. The dashed plane is designed and not yet built.
 
 ---
 
-## What is implemented
+## Operational plane
 
-- **Event contract** — Avro schema in `libs/contracts/unsubscribe_event.avsc`,
-  registered in Schema Registry with `BACKWARD` compatibility. A producer cannot
-  publish an event that does not match the schema.
-- **Message key** — `user_id:writer_id`, so all events for one subscription land
-  in the same partition and are never processed concurrently.
-- **Durability** — three brokers, `replication_factor=3`,
-  `min.insync.replicas=2`, producers with `acks=all` and idempotence enabled.
-- **Legal ingestion** — reads a CSV from object storage, validates row by row,
-  publishes the valid rows, writes the rejected ones with a reason, moves the
-  processed file aside, and is idempotent per file.
-- **Failure handling** — bounded in-place retries with growing backoff, then a
-  dead-letter topic per source topic. Permanently rejected and undecodable
-  messages skip the retries and go straight to the DLQ.
-- **Fault injection** — the producers can generate duplicates and garbage on
-  demand; UnsubscribeMe can be told to fail or to be slow.
+Three producers, two Kafka topics split by SLA, two deployments of the same
+consumer, and one external service that applies the change.
 
-Not implemented: the analytical plane, and automated tests.
+```mermaid
+flowchart LR
+    UI[UI] --> P[unsubscribe-priority]
+    CS[Customer Success] --> P
+    L[Legal ingestion] --> LG[unsubscribe-legal]
+    P --> PC[priority-consumer]
+    LG --> LC[legal-consumer]
+    PC --> U[UnsubscribeMe] --> DB[(Postgres)]
+    LC --> U
+    PC -.failures.-> D[DLQ topics]
+    LC -.failures.-> D
+```
+
+The topics are split by latency expectation rather than by source, so a
+million-row Legal batch cannot queue in front of a fresh UI click. Both consumers
+run the same code and differ only in configuration.
+
+Delivery is at-least-once: the terminal step is an HTTP call to an external
+service, which no Kafka transaction can cover, so the consumer commits its offset
+only after the call succeeds. Repeated delivery is safe because UnsubscribeMe
+applies the change as an idempotent UPSERT keyed on the subscription, preserving
+the moment of the first unsubscribe.
+
+Failures are separated by whether a retry could help: transient ones get a few
+bounded retries, permanent ones and undecodable bytes go straight to a
+dead-letter topic. Either way the offset is committed, so one unprocessable
+message cannot stall everything behind it.
+
+**Full design and the rejected alternatives:**
+[`docs/operational-design.md`](docs/operational-design.md)
 
 ---
 
-## Running it
+## Analytics plane
+
+*Designed, not yet implemented.*
+
+Both Kafka topics feed it, with their own consumer groups, so analytics never
+interferes with operational offsets or lag. The priority topic is read by a
+continuous Structured Streaming job; the Legal topic by a batch job that wakes
+when new offsets appear, because a Legal batch may arrive in an hour or in a
+month and does not justify a job running all the time.
+
+```mermaid
+flowchart LR
+    P[unsubscribe-priority] -->|streaming| BP[Bronze priority]
+    L[unsubscribe-legal] -->|batch| BL[Bronze legal]
+    BP --> S[Silver<br/>merged on event_id]
+    BL --> S
+    S --> G[Gold<br/>daily by source]
+    S -.checks.-> M[(DQ + metrics)]
+    G --> D[Dashboards]
+    M --> D
+```
+
+Data lands in Delta Lake on the same MinIO: Bronze per topic, append-only, as it
+arrived; one Silver table merged on `event_id`, which removes redeliveries while
+keeping the same subscription arriving from different sources, since those are
+distinct business events; a Gold daily mart by date and source with unsubscribe
+counts and unique readers and writers.
+
+Data-quality checks run inline with the transformations rather than as a separate
+scan, and write to a monitoring table alongside pipeline latency metrics. Airflow
+orchestrates the batch and maintenance jobs; Metabase serves the management,
+data-quality and pipeline-health dashboards.
+
+**Full design, including deduplication, DQ checks, orchestration, backfill and
+schema evolution:** [`docs/analytics-design.md`](docs/analytics-design.md)
+
+---
+
+## Running locally
 
 **Prerequisites:** Docker with Compose, and [uv](https://docs.astral.sh/uv/).
 
@@ -110,8 +145,8 @@ the bucket, `db-migrate` applies the database schema.
 
 ### 2. Create the topics
 
-Auto-creation is disabled on purpose. Topics are declared in
-`infra/topics.yaml` and applied explicitly:
+Auto-creation is disabled on purpose. Topics are declared in `infra/topics.yaml`
+and applied explicitly:
 
 ```bash
 uv sync
@@ -131,20 +166,12 @@ docker compose -f infra/docker-compose.yml up -d --wait \
 docker compose -f infra/docker-compose.yml up -d ui-producer cs-producer
 ```
 
-The producers generate a continuous stream: UI at about 2 events per second,
-Customer Success at about one every five seconds.
+The producers generate a continuous stream: UI at 100 events per second,
+Customer Success at 1 per second. Both rates are environment variables
+(`UI_EVENTS_PER_SECOND`, `CS_EVENTS_PER_SECOND`) — lower them if the stream
+scrolls past faster than you can read it.
 
-### 4. Run a Legal batch
-
-```bash
-uv run python tools/generate_legal_batch.py --rows 200 --broken-share 0.1
-docker compose -f infra/docker-compose.yml --profile jobs run --rm legal-ingestion
-```
-
-The generator writes a CSV into the bucket; ingestion processes it once and
-exits. Running it a second time on the same file produces no new events.
-
-### 5. Stop
+### 4. Stop
 
 ```bash
 docker compose -f infra/docker-compose.yml down --remove-orphans
@@ -159,7 +186,7 @@ Add `-v` to also drop the volumes and start from an empty cluster next time.
 | What | Where |
 |---|---|
 | Topics, partitions, messages, consumer lag | Kafka UI — http://localhost:8082 |
-| Files in the Legal landing zone (bucket `tikblog-legal`, prefixes `legal_inbox/`, `legal_processed/`, `legal_rejects/`) | MinIO console — http://localhost:9001 (`tikblog` / `tikblog-local`) |
+| Legal files: bucket `tikblog-legal`, prefixes `legal_inbox/`, `legal_processed/`, `legal_rejects/` | MinIO console — http://localhost:9001 (`tikblog` / `tikblog-local`) |
 | Registered schemas | http://localhost:8081/subjects |
 | Operational state | Postgres on `localhost:5432`, database `tikblog` |
 | Service logs | `docker compose -f infra/docker-compose.yml logs -f <service>` |
@@ -168,79 +195,71 @@ Kafka UI decodes Avro through the registry, so messages are readable there. A
 plain `kafka-console-consumer` shows binary, because every value starts with a
 schema id.
 
-### The same things from the terminal
-
-Current state, by source:
+The same things from the terminal — current state by source, consumer lag, live
+deliveries, files in the bucket:
 
 ```bash
 docker compose -f infra/docker-compose.yml exec -T postgres \
   psql -U tikblog -d tikblog -c \
   "select unsubscribe_source, count(*) from subscription group by 1 order by 2 desc;"
-```
 
-Consumer lag:
-
-```bash
 docker compose -f infra/docker-compose.yml exec -T kafka \
   /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:29092 \
   --describe --group unsubscribe-priority-consumer
-```
 
-Live delivery, one line per call:
-
-```bash
 docker compose -f infra/docker-compose.yml logs -f priority-consumer
-```
 
-Files in the bucket:
-
-```bash
-docker compose -f infra/docker-compose.yml exec -T minio \
-  ls -R /data/tikblog-legal
+docker compose -f infra/docker-compose.yml exec -T minio ls -R /data/tikblog-legal
 ```
 
 ---
 
-## Seeing the guarantees hold
+## Demo walkthrough
 
-Every behaviour worth claiming can be reproduced here. All fault injection is off
-by default, so the default run is a clean stream.
+One unsubscribe, followed from the click to the report. Fault injection is off by
+default, except for a small share of technical duplicates (0.1%), which keeps the
+default run realistic without making it noisy.
 
-### Normal operation
+### 1. Generate traffic from all three sources
+
+UI and Customer Success produce continuously once started (step 3 above). Legal
+arrives as a file:
+
+```bash
+uv run python tools/generate_legal_batch.py --rows 200 --broken-share 0.1
+docker compose -f infra/docker-compose.yml --profile jobs run --rm legal-ingestion
+```
+
+The generator writes a CSV into the bucket; ingestion processes it once and
+exits. The final log line reports `rows_read`, `events_sent` and `rows_rejected`,
+and the numbers add up.
+
+### 2. Follow the operational path
+
+In Kafka UI both topics are filling; the priority consumer group shows its lag.
+In the logs, each request produces an access line and a business line with
+`event_id`, `request_id`, `user_id`, `writer_id`, `source` and an `outcome`:
 
 ```bash
 docker compose -f infra/docker-compose.yml logs --tail=5 unsubscribeme
 ```
 
-Each request produces two lines: the HTTP access log, and a business line with
-`event_id`, `request_id`, `user_id`, `writer_id`, `source` and an `outcome`.
+The result lands in Postgres, split by source — UI dominates, Customer Success is
+rare, Legal appears in batches.
 
-### Duplicates and idempotency
-
-Restart the producers with duplicates enabled:
+### 3. Send duplicates and watch nothing change
 
 ```bash
-TECHNICAL_DUPLICATE_PROBABILITY=0.2 BUSINESS_DUPLICATE_PROBABILITY=0.1 \
+TECHNICAL_DUPLICATE_PROBABILITY=0.2 \
   docker compose -f infra/docker-compose.yml up -d --force-recreate ui-producer cs-producer
-```
 
-`TECHNICAL_DUPLICATE_PROBABILITY` re-sends the identical event — a redelivery.
-`BUSINESS_DUPLICATE_PROBABILITY` sends a new event for the same user and writer
-from a different source — a person who unsubscribed in the UI and then asked
-support to do it again.
-
-Count how UnsubscribeMe answered:
-
-```bash
 docker compose -f infra/docker-compose.yml logs unsubscribeme \
   | grep -o '"outcome": *"[a-z_]*"' | sort | uniq -c
 ```
 
-`created` is a new unsubscribe, `unchanged` is a repeat that changed nothing.
-The second number is the guarantee: those events were delivered, accepted, and
-had no effect.
-
-The same fact from the database — rows whose state was rewritten after creation:
+`created` is a new unsubscribe; `unchanged` confirms that a duplicate was
+accepted without changing the subscription state. The same fact from the
+database — rows whose state was rewritten after creation:
 
 ```bash
 docker compose -f infra/docker-compose.yml exec -T postgres \
@@ -250,55 +269,40 @@ docker compose -f infra/docker-compose.yml exec -T postgres \
 
 Zero. A repeat does not even touch the row.
 
-### Rejected rows from a Legal batch
+### 4. Look at the rows Legal got wrong
 
 ```bash
 uv run python tools/generate_legal_batch.py --rows 120 --broken-share 0.15 --name demo.csv
 docker compose -f infra/docker-compose.yml --profile jobs run --rm legal-ingestion
-```
 
-The final log line reports `rows_read`, `events_sent` and `rows_rejected`, and
-the numbers add up. The broken rows — empty user, missing writer, unparsable
-date, wrong column count — never become events:
-
-```bash
 docker compose -f infra/docker-compose.yml exec -T minio \
   cat /data/tikblog-legal/legal_rejects/demo.csv.rejects.csv
 ```
 
 Each line carries the source file, the line number, the raw row and the reason.
-This is not the DLQ: these rows never reached Kafka. The file itself ends up in
-`legal_processed/`, and a second run skips it.
+These rows never reached Kafka, which is what separates a reject from a
+dead-lettered message. The file itself ends up in `legal_processed/`, and a
+second run skips it.
 
-### The dead-letter queue
-
-Make UnsubscribeMe fail every request:
+### 5. Break the downstream service
 
 ```bash
 UNSUBSCRIBEME_FAILURE_RATE=1 \
   docker compose -f infra/docker-compose.yml up -d --force-recreate unsubscribeme
-```
 
-The consumer retries each event three times with a growing pause, then parks it:
-
-```bash
 docker compose -f infra/docker-compose.yml logs -f priority-consumer
 ```
 
 Look for `unsubscribe_call_retry`, then `unsubscribe_retries_exhausted`, then
-`message_parked_in_dlq`. The queue keeps moving — one unprocessable message does
-not block what is behind it. Parked messages are in `unsubscribe-priority.dlq`
-in Kafka UI, with headers explaining why: `dlq_reason`, `dlq_error`,
-`dlq_attempts`, and the original topic, partition and offset.
+`message_parked_in_dlq`. The queue keeps moving. Parked messages are in
+`unsubscribe-priority.dlq` in Kafka UI, with headers explaining why:
+`dlq_reason`, `dlq_error`, `dlq_attempts`, and the original topic, partition and
+offset.
 
-This also exposes the honest limit of the design. With a total outage, three
-attempts per event take about a second and a half, and then every event in the
-topic is parked: the DLQ becomes a copy of the stream rather than a place for
-exceptions. Bounded retries protect the queue from one bad message; they do not
-protect it from a dead downstream. A production system needs a circuit breaker
-here — after N consecutive failures, stop consuming altogether and wait for the
-service to come back, instead of shovelling the whole topic into the DLQ. That
-is deliberately not implemented, and it is the first thing to add.
+This also shows a limitation of the current design: with a total outage, every
+event ends up parked and the DLQ becomes a copy of the stream. Bounded retries
+protect the queue from one bad message, not from a dead downstream — that needs a
+circuit breaker, which is deliberately not implemented.
 
 Repair the service and the stream recovers on its own:
 
@@ -307,34 +311,36 @@ UNSUBSCRIBEME_FAILURE_RATE=0 \
   docker compose -f infra/docker-compose.yml up -d --force-recreate unsubscribeme
 ```
 
-A poison pill takes a different path. Producing bytes that do not match the
-schema at all:
+A poison pill takes a different path — bytes that do not match the schema at all
+cannot be decoded however often they are re-read, so they skip the retries and go
+straight to the DLQ with `dlq_reason=deserialization_failed`:
 
 ```bash
 GARBAGE_BYTES_PROBABILITY=0.05 \
   docker compose -f infra/docker-compose.yml up -d --force-recreate ui-producer
 ```
 
-Those messages cannot be decoded however often they are re-read, so they skip the
-retries entirely and go straight to the DLQ with `dlq_reason=deserialization_failed`,
-byte for byte as they arrived.
-
-### Workload isolation
-
-Start a large Legal batch and watch the priority path stay unaffected:
+### 6. Overload the Legal path and watch the UI path ignore it
 
 ```bash
 uv run python tools/generate_legal_batch.py --rows 100000 --name big.csv
 docker compose -f infra/docker-compose.yml --profile jobs run --rm legal-ingestion
 ```
 
-Lag grows on `unsubscribe-legal` while `unsubscribe-priority` keeps up, because
-the two paths share nothing but the business logic. Scaling the legal consumer
-drains it faster, up to the partition count:
+Lag grows on `unsubscribe-legal` while `unsubscribe-priority` keeps up. Scaling
+the legal consumer drains it faster, up to the partition count:
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d --scale legal-consumer=3 legal-consumer
 ```
+
+### 7. Follow the same events into analytics
+
+*Not available yet.* When the analytics plane is implemented, the walkthrough
+continues here: the same events in Bronze, deduplicated in Silver, aggregated in
+Gold; the Airflow UI showing the Legal sensor, the Gold refresh, housekeeping and
+a manual backfill; and the three Metabase dashboards, including a data-quality
+failure produced by the fault injection above.
 
 ---
 
@@ -348,10 +354,9 @@ at startup; the defaults target the local Compose stack.
 | `KAFKA_REPLICATION_FACTOR` | `3` | replication for the cluster's internal topics |
 | `KAFKA_MIN_IN_SYNC_REPLICAS` | `2` | how many replicas must confirm a write |
 | `KAFKA_TOPIC_PARTITIONS` | `3` | default partition count |
-| `UI_EVENTS_PER_SECOND` | `2` | UI producer rate |
-| `CS_EVENTS_PER_SECOND` | `0.2` | Customer Success producer rate |
-| `TECHNICAL_DUPLICATE_PROBABILITY` | `0` | resend the identical event |
-| `BUSINESS_DUPLICATE_PROBABILITY` | `0` | same subscription from another source |
+| `UI_EVENTS_PER_SECOND` | `100` | UI producer rate |
+| `CS_EVENTS_PER_SECOND` | `1` | Customer Success producer rate |
+| `TECHNICAL_DUPLICATE_PROBABILITY` | `0.001` | resend the identical event |
 | `MEANINGLESS_EVENT_PROBABILITY` | `0` | schema-valid but nonsensical event |
 | `GARBAGE_BYTES_PROBABILITY` | `0` | bytes that bypass the serializer |
 | `CONSUMER_MAX_ATTEMPTS` | `3` | in-place retries before the DLQ |
@@ -382,6 +387,7 @@ infra/
   topics.yaml             topic declarations
   migrations/             database schema
 tools/                    apply topics, generate Legal batches
+docs/                     design documents and decisions
 ```
 
 ---
@@ -391,9 +397,9 @@ tools/                    apply topics, generate Legal batches
 The local stack is an executable model of the design, not a production
 deployment. Single-host brokers, plaintext listeners, passwords in Compose
 defaults, and a stub standing in for a third-party service are all conscious
-simplifications.
+simplifications. There are no automated tests.
 
-Three boundaries are drawn on purpose:
+Four boundaries are drawn on purpose:
 
 - **The event contract for UI and Customer Success is assumed.** Those services
   are expected to emit the canonical event; the schema registry enforces its
@@ -401,10 +407,10 @@ Three boundaries are drawn on purpose:
   its row-level validation is inside the boundary.
 - **The reverse operation belongs elsewhere.** Unsubscribe is monotonic here;
   resubscription is another service's concern.
-- **The analytical plane is not designed yet.** Both topics are the intended
-  entry point, and the choice between "requests received" and "unsubscribes
-  applied" as the source for reporting is still open.
 - **There is no circuit breaker.** Retries are bounded per message, so a single
   unprocessable event cannot stall the queue. A downstream that is down for
   everyone is a different failure, and the current design answers it by parking
-  everything — correct, but not what you want at three in the morning.
+  everything.
+- **The analytical plane is designed but not built.** Its entry point, storage
+  layout, deduplication rules, quality checks and orchestration are settled in
+  [`docs/analytics-design.md`](docs/analytics-design.md); no code exists yet.

@@ -1,13 +1,9 @@
 # LLM files
 CLAUDE.md
 .claude
-work-on-screen/
 .agents/
 
-# Working notes: drafts in Russian, not part of the deliverable
-plan.md
-tikblog-operational-architecture.md
-tikblog-operational-streaming.md
+docs/decisions.md
 
 # Local configuration and operating-system files
 .DS_Store
