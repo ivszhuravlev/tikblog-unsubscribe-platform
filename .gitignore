@@ -1,11 +1,10 @@
 # LLM files
 CLAUDE.md
 .claude
+work-on-screen/
+.agents/
 
-# Local project notes and learning files
-README.md
-docs/
-tests/
+# Working notes: drafts in Russian, not part of the deliverable
 plan.md
 tikblog-operational-architecture.md
 tikblog-operational-streaming.md

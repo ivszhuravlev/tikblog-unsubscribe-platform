@@ -24,8 +24,6 @@ dev = [
     # boto3 ships no type information of its own; mypy strict needs the stubs.
     "boto3-stubs[s3]>=1.40,<2",
     "mypy>=1.17,<2",
-    "pytest>=8.4,<9",
-    "pytest-cov>=6.2,<7",
     "ruff>=0.12,<1",
     "types-pyyaml>=6.0.12",
 ]
@@ -35,18 +33,6 @@ where = ["libs"]
 
 [tool.setuptools.package-data]
 contracts = ["*.avsc", "py.typed"]
-
-[tool.pytest.ini_options]
-addopts = "--strict-config --strict-markers -q"
-testpaths = ["tests"]
-# Services are not installed packages: tests import them from their source tree.
-pythonpath = [
-    "services/event-producers",
-    "services/legal-ingestion",
-    "services/unsubscribe-consumer",
-    "services/unsubscribeme",
-]
-markers = ["integration: needs the local stack from infra/docker-compose.yml"]
 
 [tool.ruff]
 line-length = 100
@@ -58,5 +44,5 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["libs", "services", "tests"]
+files = ["libs", "services", "tools"]
 exclude = ["services/.*/build/"]

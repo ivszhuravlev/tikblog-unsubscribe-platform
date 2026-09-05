@@ -390,6 +390,8 @@ services:
       UNSUBSCRIBE_CONSUMER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
       UNSUBSCRIBE_CONSUMER_TOPIC: "${PRIORITY_TOPIC:-unsubscribe-priority}"
       UNSUBSCRIBE_CONSUMER_GROUP_ID: "${PRIORITY_GROUP_ID:-unsubscribe-priority-consumer}"
+      UNSUBSCRIBE_CONSUMER_DLQ_TOPIC: "${PRIORITY_DLQ_TOPIC:-unsubscribe-priority.dlq}"
+      UNSUBSCRIBE_CONSUMER_MAX_ATTEMPTS: "${CONSUMER_MAX_ATTEMPTS:-3}"
       UNSUBSCRIBE_CONSUMER_UNSUBSCRIBEME_URL: http://unsubscribeme:8080
 
   legal-consumer:
@@ -415,6 +417,8 @@ services:
       UNSUBSCRIBE_CONSUMER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
       UNSUBSCRIBE_CONSUMER_TOPIC: "${LEGAL_TOPIC:-unsubscribe-legal}"
       UNSUBSCRIBE_CONSUMER_GROUP_ID: "${LEGAL_GROUP_ID:-unsubscribe-legal-consumer}"
+      UNSUBSCRIBE_CONSUMER_DLQ_TOPIC: "${LEGAL_DLQ_TOPIC:-unsubscribe-legal.dlq}"
+      UNSUBSCRIBE_CONSUMER_MAX_ATTEMPTS: "${CONSUMER_MAX_ATTEMPTS:-3}"
       UNSUBSCRIBE_CONSUMER_UNSUBSCRIBEME_URL: http://unsubscribeme:8080
 
 volumes:

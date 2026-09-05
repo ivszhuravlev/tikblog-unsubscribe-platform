@@ -14,3 +14,18 @@ topics:
     config:
       retention.ms: 604800000
       min.insync.replicas: 2
+  # Dead-letter topics: one per source topic, so a poisoned Legal batch can
+  # never delay the priority path. Kept far longer than the main topics because
+  # a parked message is only useful while someone can still look at it.
+  - name: unsubscribe-priority.dlq
+    partitions: 3
+    replication_factor: 3
+    config:
+      retention.ms: 2592000000
+      min.insync.replicas: 2
+  - name: unsubscribe-legal.dlq
+    partitions: 3
+    replication_factor: 3
+    config:
+      retention.ms: 2592000000
+      min.insync.replicas: 2
