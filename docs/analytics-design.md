@@ -1,7 +1,7 @@
 # Analytics Plane — Design
 
-Not implemented yet. This document fixes the design so the implementation has
-nothing left to invent; the README describes only what already runs.
+This document captures the detailed design of the analytics plane before
+implementation.
 
 The operational plane applies unsubscribes. This plane turns the same events
 into reportable data: a management dashboard and ad-hoc historical analysis.
@@ -51,9 +51,12 @@ Both Kafka topics feed analytics, with different processing shapes:
 | `unsubscribe-priority` | UI + Customer Success | continuous Structured Streaming |
 | `unsubscribe-legal` | Legal | event-driven batch job |
 
-Analytics uses its own consumer groups, independent from the operational
-consumers: the two planes read the same topics without affecting each other's
-offsets or lag.
+Analytics keeps its own offset state and does not affect the operational
+consumers. That state lives in Spark checkpoints, not in a Kafka consumer group:
+the Structured Streaming Kafka source manages consumed offsets internally and
+does not commit them back to Kafka. Analytics lag is therefore measured as
+`latest Kafka offset - offset processed by Spark`, read from the streaming
+query's progress, not from `kafka-consumer-groups.sh`.
 
 **Why Legal is read from Kafka rather than from the original CSV.** The CSV is
 already in MinIO, but the operational Legal ingestion is what parses, validates
@@ -62,8 +65,16 @@ reimplementing that logic and letting the two copies drift. Kafka already holds
 the normalised result.
 
 **Why Legal is batch rather than streaming.** A Legal batch may arrive in an hour
-or in a month. Keeping a streaming job alive for it wastes compute; the job runs
-when new offsets appear and exits when they are consumed.
+or in a month. Keeping a job alive for it wastes compute, so it runs when new
+offsets appear and exits when they are consumed.
+
+**How the Legal job knows where it stopped.** It is a Structured Streaming query
+with `Trigger.AvailableNow` and a persistent checkpoint: it processes everything
+available in the topic and terminates. The semantics stay batch and event-driven
+— no long-running compute — while offset tracking is Spark's job rather than
+ours. The alternative, a plain batch job storing last processed offsets per
+partition in a control table, means writing and testing that bookkeeping by hand
+for no gain here.
 
 ---
 
@@ -147,7 +158,14 @@ and reader and writer activity.
 
 Gold is a Delta table refreshed by a Spark job, not a materialized view: in a
 plain OSS stack there is nothing to maintain it automatically. Refreshed every
-5 minutes for the demo. Partitioned by `event_date`; clustered on whatever
+5 minutes for the demo.
+
+**The refresh is incremental, not a full rebuild.** The job finds the
+`event_date` values touched by new Silver rows, recalculates the
+`(event_date, source)` aggregates for those dates from Silver, and `MERGE`s the
+result into Gold. This matters for Legal in particular: a batch arriving today
+can carry a `requested_at` from last week, so the affected date is not
+necessarily today. Partitioned by `event_date`; clustered on whatever
 dimensions the dashboard actually filters by, not on everything.
 
 ---
@@ -221,6 +239,16 @@ failure. The dashboards show the same thresholds as green / yellow / red.
 Metabase, chosen over Superset for this project: quicker to bring up in Docker
 and quicker to build three readable dashboards in.
 
+Metabase cannot read Delta files from object storage directly — it needs a SQL
+endpoint. A Spark Thrift Server sits in between, and Metabase connects to it with
+the SparkSQL driver:
+
+```text
+Delta on MinIO -> Spark SQL (Thrift Server) -> Metabase
+```
+
+Without that hop the dashboards have nothing to query.
+
 | Dashboard | Reads | Shows |
 |---|---|---|
 | Management | `gold.unsubscribe_daily` | unsubscribe activity by date and source, unique readers and writers |
@@ -240,8 +268,9 @@ nothing extra to build.
 **Priority streaming** is a long-running Spark job, not a scheduled DAG. It is
 not restarted every five minutes.
 
-**Legal DAG** — a Kafka sensor in deferrable/reschedule mode, so waiting does not
-hold an Airflow worker. New Legal offsets wake the DAG: Kafka → Bronze Legal →
+**Legal DAG** — a deferrable `AwaitMessageSensor` from the Kafka provider, so
+waiting releases the worker instead of occupying it. This requires the Airflow
+`triggerer` to be running. New Legal offsets wake the DAG: Kafka → Bronze Legal →
 Silver, then compute stops.
 
 **Gold DAG** — every 5 minutes: Silver → Gold aggregation → Gold DQ → metrics.

@@ -126,7 +126,9 @@ with zero write availability, where the first restart stops all producers.
 
 The message key is `user_id:writer_id`. Kafka guarantees order only within a
 partition, and the partition is chosen by hashing the key, so all events for one
-subscription are handled sequentially by one consumer instance. Correctness does
+subscription are handled sequentially by one consumer instance *within that
+topic*. The same subscription can still appear on both topics at once — a UI
+click and a Legal batch — and there is no ordering between them. Correctness does
 not depend on it — unsubscribe is monotonic — but it removes concurrent writers
 for the same row for free, and the key space is large enough not to create a hot
 partition.
@@ -139,8 +141,10 @@ file is parsed here — so its row-level validation is inside the boundary.
 
 A row that cannot become an event (empty user, missing writer, unparsable date,
 wrong column count) is written to a reject file with its line number and reason.
-Individual bad rows do not discard the batch; a file that is broken as a whole —
-unreadable, wrong header — is set aside without a row-by-row attempt.
+Individual bad rows do not discard the batch; a file that cannot be read at all is
+set aside without a row-by-row attempt. Header validation is not implemented: the
+first line is skipped, so a file with the right shape but wrong column names is
+processed as if the columns were correct.
 
 Rejects are not the DLQ. A reject never reached Kafka; a dead-lettered message
 was published and could not be processed afterwards. Different stage, different

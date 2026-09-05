@@ -19,8 +19,9 @@ The platform has three requirements:
 | Customer Success | rare, an agent acting for the reader | near real time |
 | Legal | a CSV batch, up to millions of rows | best effort |
 
-This repository implements the operational unsubscribe path end to end, and the
-analytical platform built on top of the same events.
+This repository implements the operational unsubscribe path end to end. The
+analytical platform built on the same events is designed and is the next
+implementation step.
 
 ---
 
@@ -93,8 +94,9 @@ message cannot stall everything behind it.
 
 *Designed, not yet implemented.*
 
-Both Kafka topics feed it, with their own consumer groups, so analytics never
-interferes with operational offsets or lag. The priority topic is read by a
+Both Kafka topics feed it with their own offset state, kept in Spark checkpoints
+rather than in Kafka consumer groups, so analytics never interferes with the
+operational consumers. The priority topic is read by a
 continuous Structured Streaming job; the Legal topic by a batch job that wakes
 when new offsets appear, because a Legal batch may arrive in an hour or in a
 month and does not justify a job running all the time.
