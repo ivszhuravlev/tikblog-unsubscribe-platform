@@ -1,0 +1,40 @@
+EVENT = """event_id STRING, user_id STRING, writer_id STRING, source STRING,
+requested_at TIMESTAMP, request_id STRING, cs_agent_id STRING, legal_batch_id STRING"""
+META = """schema_id INT, kafka_topic STRING, kafka_partition INT, kafka_offset BIGINT,
+kafka_timestamp TIMESTAMP, bronze_ingested_at TIMESTAMP, event_date DATE,
+decode_error STRING, raw_value STRING"""
+TABLES = {
+    "bronze.unsubscribe_priority": EVENT + ", " + META,
+    "bronze.unsubscribe_legal": EVENT + ", " + META,
+    "silver.unsubscribe_events": EVENT + ", " + META + ", silver_processed_at TIMESTAMP",
+    "gold.unsubscribe_daily": """event_date DATE, source STRING, unsubscribe_count BIGINT,
+        unique_readers BIGINT, unique_writers BIGINT, gold_updated_at TIMESTAMP""",
+    "monitoring.dq_results": """run_id STRING, pipeline_name STRING, layer STRING,
+        source STRING, check_name STRING, status STRING, total_rows BIGINT,
+        failed_rows BIGINT, failed_rate DOUBLE, checked_at TIMESTAMP""",
+    "monitoring.dq_quarantine": """run_id STRING, pipeline_name STRING, source STRING,
+        event_id STRING, user_id STRING, writer_id STRING, requested_at TIMESTAMP,
+        kafka_topic STRING, kafka_partition INT, kafka_offset BIGINT,
+        failed_checks ARRAY<STRING>, failure_reason STRING, quarantined_at TIMESTAMP,
+        raw_value STRING""",
+    "monitoring.pipeline_metrics": """observed_at TIMESTAMP, window_start TIMESTAMP,
+        window_end TIMESTAMP, pipeline_name STRING, source STRING, metric_name STRING,
+        metric_value DOUBLE, unit STRING, status STRING, run_id STRING,
+        kafka_topic STRING, kafka_partition INT""",
+    "monitoring.alert_events": """alert_id STRING, created_at TIMESTAMP,
+        pipeline_name STRING, source STRING, alert_type STRING, severity STRING,
+        status STRING, metric_name STRING, current_value DOUBLE, threshold DOUBLE,
+        message STRING, run_id STRING""",
+}
+KEYS = {
+    "monitoring.dq_results": ["run_id", "source", "check_name"],
+    "monitoring.dq_quarantine": ["run_id", "kafka_topic", "kafka_partition", "kafka_offset"],
+    "monitoring.pipeline_metrics": [
+        "run_id",
+        "source",
+        "metric_name",
+        "kafka_topic",
+        "kafka_partition",
+    ],
+    "monitoring.alert_events": ["alert_id"],
+}

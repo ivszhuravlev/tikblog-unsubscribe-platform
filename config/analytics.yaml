@@ -1,0 +1,31 @@
+kafka_bootstrap: kafka:29092,kafka-2:29092,kafka-3:29092
+schema_registry_url: http://schema-registry:8081
+minio_endpoint: http://minio:9000
+bucket: tikblog-analytics
+spark_master: spark://spark-master:7077
+priority_topic: unsubscribe-priority
+legal_topic: unsubscribe-legal
+starting_offsets: earliest
+fail_on_data_loss: true
+trigger_seconds: 15
+max_offsets_per_trigger: 10000
+shuffle_partitions: 3
+executor_instances: 3
+executor_cores: 1
+executor_memory: 512m
+worker_count: 3
+merge_attempts: 5
+merge_backoff_seconds: 1
+bronze_retention_days: 90
+vacuum_retention_hours: 168
+monitoring_retention_days: 90
+optimize_gold: false
+gold_schedule: '*/5 * * * *'
+gold_lookback_minutes: 30
+sensor_poll_seconds: 15
+sensor_group: tikblog-analytics-legal-sensor
+checkpoints:
+  priority_kafka_to_bronze: checkpoints/priority_kafka_to_bronze
+  priority_bronze_to_silver: checkpoints/priority_bronze_to_silver
+  legal_kafka_to_bronze: checkpoints/legal_kafka_to_bronze
+  legal_bronze_to_silver: checkpoints/legal_bronze_to_silver

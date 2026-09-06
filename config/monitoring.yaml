@@ -1,0 +1,19 @@
+dq_failed_rate:
+  yellow: 0.001
+  red: 0.05
+duplicate_failed_rate:
+  yellow: 0.001
+  red: 0.1
+metrics:
+  e2e_p95_seconds:
+    UI: {yellow: 300, red: 600}
+    CUSTOMER_SUCCESS: {yellow: 300, red: 600}
+    LEGAL: {yellow: 2592000, red: 7776000}
+  processing_p95_seconds:
+    default: {yellow: 60, red: 180}
+  kafka_lag:
+    default: {yellow: 10000, red: 50000}
+  microbatch_duration_ms:
+    default: {yellow: 15000, red: 60000}
+  gold_freshness_seconds:
+    default: {yellow: 600, red: 900}

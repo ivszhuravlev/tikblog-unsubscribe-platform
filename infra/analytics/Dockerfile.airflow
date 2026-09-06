@@ -1,0 +1,7 @@
+FROM apache/airflow:2.10.5-python3.10
+USER airflow
+RUN pip install --no-cache-dir apache-airflow==2.10.5 confluent-kafka==2.8.0 PyYAML==6.0.2
+COPY analytics /app/analytics
+COPY config /app/config
+COPY airflow/dags /opt/airflow/dags
+ENV PYTHONPATH=/app:/opt/airflow/dags

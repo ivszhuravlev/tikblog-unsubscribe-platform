@@ -1,9 +1,16 @@
 name: tikblog-platform
 
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   kafka:
     image: apache/kafka:3.9.1
     restart: unless-stopped
+    logging: *logging
     ports:
       - "${KAFKA_HOST_PORT:-9092}:9092"
     environment:
@@ -38,6 +45,7 @@ services:
   kafka-2:
     image: apache/kafka:3.9.1
     restart: unless-stopped
+    logging: *logging
     ports:
       - "${KAFKA_2_HOST_PORT:-9093}:9092"
     environment:
@@ -72,6 +80,7 @@ services:
   kafka-3:
     image: apache/kafka:3.9.1
     restart: unless-stopped
+    logging: *logging
     ports:
       - "${KAFKA_3_HOST_PORT:-9094}:9092"
     environment:
@@ -237,14 +246,12 @@ services:
         mc mb --ignore-existing "local/$$LEGAL_BUCKET"
         echo "bucket ready: $$LEGAL_BUCKET"
 
-  ui-producer:
+  topic-init:
     build:
       context: ..
       dockerfile: services/event-producers/Dockerfile
-    restart: unless-stopped
-    # Must stay above EVENT_PRODUCERS_FLUSH_TIMEOUT_SECONDS, otherwise
-    # SIGKILL arrives in the middle of the flush and the shutdown counters lie.
-    stop_grace_period: 30s
+    restart: "no"
+    logging: *logging
     depends_on:
       kafka:
         condition: service_healthy
@@ -252,6 +259,25 @@ services:
         condition: service_healthy
       kafka-3:
         condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092,kafka-2:29092,kafka-3:29092
+    volumes:
+      - ../tools:/app/tools:ro
+      - ../infra:/app/infra:ro
+    entrypoint: [python, /app/tools/apply_topics.py]
+
+  ui-producer:
+    build:
+      context: ..
+      dockerfile: services/event-producers/Dockerfile
+    restart: unless-stopped
+    logging: *logging
+    # Must stay above EVENT_PRODUCERS_FLUSH_TIMEOUT_SECONDS, otherwise
+    # SIGKILL arrives in the middle of the flush and the shutdown counters lie.
+    stop_grace_period: 30s
+    depends_on:
+      topic-init:
+        condition: service_completed_successfully
       schema-registry:
         condition: service_healthy
     environment:
@@ -273,16 +299,13 @@ services:
       context: ..
       dockerfile: services/event-producers/Dockerfile
     restart: unless-stopped
+    logging: *logging
     # Must stay above EVENT_PRODUCERS_FLUSH_TIMEOUT_SECONDS, otherwise
     # SIGKILL arrives in the middle of the flush and the shutdown counters lie.
     stop_grace_period: 30s
     depends_on:
-      kafka:
-        condition: service_healthy
-      kafka-2:
-        condition: service_healthy
-      kafka-3:
-        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
       schema-registry:
         condition: service_healthy
     environment:
@@ -372,14 +395,11 @@ services:
       context: ..
       dockerfile: services/unsubscribe-consumer/Dockerfile
     restart: unless-stopped
+    logging: *logging
     stop_grace_period: 30s
     depends_on:
-      kafka:
-        condition: service_healthy
-      kafka-2:
-        condition: service_healthy
-      kafka-3:
-        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
       schema-registry:
         condition: service_healthy
       unsubscribeme:
@@ -399,14 +419,11 @@ services:
       context: ..
       dockerfile: services/unsubscribe-consumer/Dockerfile
     restart: unless-stopped
+    logging: *logging
     stop_grace_period: 30s
     depends_on:
-      kafka:
-        condition: service_healthy
-      kafka-2:
-        condition: service_healthy
-      kafka-3:
-        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
       schema-registry:
         condition: service_healthy
       unsubscribeme:

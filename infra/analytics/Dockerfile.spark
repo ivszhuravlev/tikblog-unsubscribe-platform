@@ -1,0 +1,16 @@
+FROM apache/spark:3.5.5-python3 AS spark
+FROM python:3.11-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends openjdk-17-jre-headless curl procps && \
+    rm -rf /var/lib/apt/lists/* && \
+    ln -s "$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")" /opt/java
+COPY --from=spark /opt/spark /opt/spark
+RUN pip install --no-cache-dir delta-spark==3.3.0 --no-deps && \
+    pip install --no-cache-dir PyYAML==6.0.2 confluent-kafka==2.8.0 'PyHive[hive_pure_sasl]==0.7.0'
+COPY analytics /app/analytics
+COPY config /app/config
+COPY infra/analytics/spark-defaults.conf /opt/spark/conf/spark-defaults.conf
+COPY infra/analytics/entrypoint.sh /app/entrypoint.sh
+RUN mkdir -p /opt/spark/work-dir /opt/spark/.ivy2 && chmod -R 777 /opt/spark/work-dir /opt/spark/.ivy2
+ENV PYTHONPATH=/app PYSPARK_PYTHON=python3 SPARK_NO_DAEMONIZE=1 JAVA_HOME=/opt/java SPARK_HOME=/opt/spark
+WORKDIR /app
+ENTRYPOINT ["bash", "/app/entrypoint.sh"]

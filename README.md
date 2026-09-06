@@ -19,9 +19,8 @@ The platform has three requirements:
 | Customer Success | rare, an agent acting for the reader | near real time |
 | Legal | a CSV batch, up to millions of rows | best effort |
 
-This repository implements the operational unsubscribe path end to end. The
-analytical platform built on the same events is designed and is the next
-implementation step.
+This repository implements both planes: the operational unsubscribe path, and the
+analytical platform built on the same events.
 
 ---
 
@@ -40,15 +39,12 @@ flowchart LR
     LK --> OP
     OP --> UM[UnsubscribeMe]
 
-    PK -.-> AN[Analytics plane]
-    LK -.-> AN
-    AN -.-> DL[(Delta Lake)] -.-> DSH[Dashboards]
-
-    class AN,DL,DSH planned
-    classDef planned fill:#fff,stroke:#999,stroke-dasharray:4 3,color:#666
+    PK --> AN[Analytics plane]
+    LK --> AN
+    AN --> DL[(Delta Lake)] --> DSH[Dashboards]
 ```
 
-Solid lines run today. The dashed plane is designed and not yet built.
+Both planes run locally from one Compose stack.
 
 ---
 
@@ -91,8 +87,6 @@ message cannot stall everything behind it.
 ---
 
 ## Analytics plane
-
-*Designed, not yet implemented.*
 
 Both Kafka topics feed it with their own offset state, kept in Spark checkpoints
 rather than in Kafka consumer groups, so analytics never interferes with the
@@ -173,9 +167,23 @@ Customer Success at 1 per second. Both rates are environment variables
 (`UI_EVENTS_PER_SECOND`, `CS_EVENTS_PER_SECOND`) — lower them if the stream
 scrolls past faster than you can read it.
 
-### 4. Stop
+### 4. Start the analytics stack
 
 ```bash
+docker compose -f infra/docker-compose.analytics.yml up -d --wait
+```
+
+This brings up Spark (master, workers, the long-running driver and a Spark SQL
+endpoint), Airflow (webserver, scheduler, triggerer) and Metabase, creates the
+`tikblog-analytics` bucket, registers the Delta tables and provisions the three
+dashboards. The two priority streams — Kafka to Bronze and Bronze to Silver —
+start with the driver and keep running; Airflow only handles Legal, the Gold
+refresh, housekeeping and backfill.
+
+### 5. Stop
+
+```bash
+docker compose -f infra/docker-compose.analytics.yml down --remove-orphans
 docker compose -f infra/docker-compose.yml down --remove-orphans
 ```
 
@@ -192,6 +200,11 @@ Add `-v` to also drop the volumes and start from an empty cluster next time.
 | Registered schemas | http://localhost:8081/subjects |
 | Operational state | Postgres on `localhost:5432`, database `tikblog` |
 | Service logs | `docker compose -f infra/docker-compose.yml logs -f <service>` |
+| Dashboards: management, data quality, pipeline health | Metabase — http://localhost:3000 |
+| DAG runs, the deferred Legal sensor, task failures | Airflow UI — http://localhost:8084 |
+| Streaming queries, stages, executors | Spark master UI — http://localhost:8083, driver UI — http://localhost:4041 |
+| Ad-hoc SQL over Bronze, Silver, Gold and monitoring tables | Spark SQL (Thrift) on `localhost:10000` |
+| Delta tables | MinIO bucket `tikblog-analytics` |
 
 Kafka UI decodes Avro through the registry, so messages are readable there. A
 plain `kafka-console-consumer` shows binary, because every value starts with a
@@ -338,11 +351,76 @@ docker compose -f infra/docker-compose.yml up -d --scale legal-consumer=3 legal-
 
 ### 7. Follow the same events into analytics
 
-*Not available yet.* When the analytics plane is implemented, the walkthrough
-continues here: the same events in Bronze, deduplicated in Silver, aggregated in
-Gold; the Airflow UI showing the Legal sensor, the Gold refresh, housekeeping and
-a manual backfill; and the three Metabase dashboards, including a data-quality
-failure produced by the fault injection above.
+The same events are already flowing into Delta. Query them through the Spark SQL
+endpoint (any client on `localhost:10000`, or the Metabase native editor):
+
+```sql
+select count(*) from bronze.unsubscribe_priority;
+select count(*) from silver.unsubscribe_events;
+select * from gold.unsubscribe_daily order by event_date desc, source;
+```
+
+Bronze holds every message as it arrived, duplicates included. Silver is merged
+on `event_id`, so a redelivery leaves one row — while the same reader and writer
+arriving from UI, Customer Success and Legal stay as three rows, because those
+are three separate requests:
+
+```sql
+select count(*) as bronze_rows,
+       count(distinct event_id) as distinct_events
+from bronze.unsubscribe_priority;
+
+select user_id, writer_id, count(*) as requests,
+       collect_set(source) as sources
+from silver.unsubscribe_events
+group by user_id, writer_id
+having count(*) > 1
+limit 10;
+```
+
+### 8. Watch a data-quality failure land
+
+Turn on the nonsensical-event injection — empty `user_id`, `requested_at` in the
+future:
+
+```bash
+MEANINGLESS_EVENT_PROBABILITY=0.05 \
+  docker compose -f infra/docker-compose.yml up -d --force-recreate ui-producer
+```
+
+Those rows reach Bronze, are rejected by the inline checks before Silver, and end
+up in quarantine with the reason attached:
+
+```sql
+select failed_checks, count(*) from monitoring.dq_quarantine group by 1;
+select layer, check_name, status, failed_rows
+from monitoring.dq_results order by checked_at desc limit 20;
+```
+
+The Data Quality dashboard in Metabase turns yellow or red, and a row appears in
+`monitoring.alert_events`. Nothing is sent anywhere — the alerting is a stub on
+purpose.
+
+### 9. Open Airflow and Metabase
+
+In the Airflow UI (http://localhost:8084) the Legal DAG sits deferred on its
+sensor until a Legal batch arrives, then runs Kafka → Bronze → Silver and exits;
+the Gold refresh runs every five minutes; housekeeping is daily and can be
+triggered by hand; backfill takes `layer`, `from_date` and `to_date` as
+parameters.
+
+In Metabase (http://localhost:3000) the three dashboards are already provisioned:
+management activity from Gold, data quality from the monitoring tables, and
+pipeline health with end-to-end and processing latency, Kafka lag, microbatch
+duration and Gold freshness, each with a green / yellow / red status.
+
+### 10. Prove late data is handled
+
+Generate a Legal batch dated in the past, run ingestion, and watch the Gold
+refresh rebuild that historical date rather than only today — the job derives the
+dates to recalculate from the Silver rows it just processed, not from the clock.
+The same effect is reachable on demand through the backfill DAG with
+`layer=gold`.
 
 ---
 
@@ -388,6 +466,13 @@ infra/
   docker-compose.yml      the local stack
   topics.yaml             topic declarations
   migrations/             database schema
+analytics/
+  common/                 Spark session, config, DQ, metrics, alerts, Delta helpers
+  jobs/                   streams, Gold refresh, housekeeping, backfill
+  sql/                    table registration for the SQL endpoint
+airflow/dags/             four DAGs: Legal ingestion, Gold refresh, housekeeping, backfill
+metabase/                 dashboard bootstrap and the queries behind it
+config/                   analytics settings and monitoring thresholds
 tools/                    apply topics, generate Legal batches
 docs/                     design documents and decisions
 ```
@@ -413,6 +498,9 @@ Four boundaries are drawn on purpose:
   unprocessable event cannot stall the queue. A downstream that is down for
   everyone is a different failure, and the current design answers it by parking
   everything.
-- **The analytical plane is designed but not built.** Its entry point, storage
-  layout, deduplication rules, quality checks and orchestration are settled in
-  [`docs/analytics-design.md`](docs/analytics-design.md); no code exists yet.
+- **Analytics reports requests, not confirmed unsubscribes.** It reads the same
+  request topics as the operational consumers, so a request that ended in the DLQ
+  still counts. Reporting on applied unsubscribes would need a separate result
+  event from UnsubscribeMe.
+- **No alerting infrastructure.** Threshold breaches are written to
+  `monitoring.alert_events` and logged; nothing is sent anywhere.

@@ -1,0 +1,227 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-spark: &spark
+  image: tikblog-analytics-spark:local
+  build:
+    context: ..
+    dockerfile: infra/analytics/Dockerfile.spark
+  restart: unless-stopped
+  logging: *logging
+  environment: &spark-env
+    MINIO_ROOT_USER: "${MINIO_ROOT_USER:-tikblog}"
+    MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-tikblog-local}"
+    ANALYTICS_BUCKET: "${ANALYTICS_BUCKET:-tikblog-analytics}"
+    ANALYTICS_EXECUTOR_INSTANCES: "${ANALYTICS_EXECUTOR_INSTANCES:-3}"
+    ANALYTICS_EXECUTOR_CORES: "${ANALYTICS_EXECUTOR_CORES:-1}"
+    ANALYTICS_EXECUTOR_MEMORY: "${ANALYTICS_EXECUTOR_MEMORY:-512m}"
+  volumes:
+    - ../analytics:/app/analytics:ro
+    - ../config:/app/config:ro
+    - spark-ivy:/opt/spark/.ivy2
+
+x-airflow: &airflow
+  image: tikblog-analytics-airflow:local
+  build:
+    context: ..
+    dockerfile: infra/analytics/Dockerfile.airflow
+  restart: unless-stopped
+  logging: *logging
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow-local@airflow-db/airflow
+    AIRFLOW__WEBSERVER__SECRET_KEY: "${AIRFLOW_SECRET_KEY:-tikblog-airflow-demo-key}"
+    AIRFLOW__WEBSERVER__WORKERS: "1"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+    ANALYTICS_START_DATE: "${ANALYTICS_START_DATE:-2026-09-05T00:00:00Z}"
+    ANALYTICS_WRITER_URL: http://analytics-driver:8088
+  volumes:
+    - ../airflow/dags:/opt/airflow/dags:ro
+    - ../analytics:/app/analytics:ro
+    - ../config:/app/config:ro
+    - airflow-logs:/opt/airflow/logs
+    - alert-spool:/app/alert-spool
+  depends_on:
+    airflow-init:
+      condition: service_completed_successfully
+
+services:
+  analytics-minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    restart: "no"
+    depends_on:
+      minio: {condition: service_healthy}
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-tikblog}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-tikblog-local}"
+      ANALYTICS_BUCKET: "${ANALYTICS_BUCKET:-tikblog-analytics}"
+      ANALYTICS_READER_PASSWORD: "${ANALYTICS_READER_PASSWORD:-analytics-reader-local}"
+    entrypoint: [sh, -c]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$ANALYTICS_BUCKET"
+        printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject","s3:ListBucket","s3:GetBucketLocation"],"Resource":["arn:aws:s3:::%s","arn:aws:s3:::%s/*"]}]}' "$$ANALYTICS_BUCKET" "$$ANALYTICS_BUCKET" > /tmp/reader-policy.json
+        mc admin policy create local analytics-readonly /tmp/reader-policy.json
+        mc admin user add local analytics-reader "$$ANALYTICS_READER_PASSWORD"
+        mc admin policy attach local analytics-readonly --user analytics-reader
+
+  spark-master:
+    <<: *spark
+    command: [master]
+    ports: ["${SPARK_MASTER_UI_PORT:-8083}:8080"]
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://localhost:8080 >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  spark-worker:
+    <<: *spark
+    command: [worker]
+    deploy:
+      replicas: ${SPARK_WORKER_COUNT:-3}
+    environment:
+      <<: *spark-env
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-2}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-1g}"
+    depends_on:
+      spark-master: {condition: service_healthy}
+
+  analytics-driver:
+    <<: *spark
+    container_name: tikblog-analytics-driver
+    command: [writer]
+    ports:
+      - "${SPARK_DRIVER_UI_PORT:-4041}:4040"
+      - "127.0.0.1:${ANALYTICS_WRITER_PORT:-18088}:8088"
+    volumes:
+      - ../analytics:/app/analytics:ro
+      - ../config:/app/config:ro
+      - spark-ivy:/opt/spark/.ivy2
+      - alert-spool:/app/alert-spool
+    depends_on:
+      spark-worker: {condition: service_started}
+      analytics-minio-init: {condition: service_completed_successfully}
+      schema-registry: {condition: service_healthy}
+      topic-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://localhost:8088/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+
+  spark-sql:
+    <<: *spark
+    command: [thrift]
+    working_dir: /opt/spark/work-dir
+    environment:
+      <<: *spark-env
+      ANALYTICS_EXECUTOR_INSTANCES: "1"
+      MINIO_ROOT_USER: analytics-reader
+      MINIO_ROOT_PASSWORD: "${ANALYTICS_READER_PASSWORD:-analytics-reader-local}"
+    volumes:
+      - ../analytics:/app/analytics:ro
+      - ../config:/app/config:ro
+      - spark-ivy:/opt/spark/.ivy2
+      - spark-metastore:/opt/spark/work-dir
+    ports:
+      - "${SPARK_SQL_PORT:-10000}:10000"
+      - "${SPARK_SQL_UI_PORT:-4042}:4040"
+    depends_on:
+      analytics-driver: {condition: service_healthy}
+    healthcheck:
+      test: [CMD-SHELL, "python3 -c \"import socket; socket.create_connection(('localhost',10000),2).close()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+
+  analytics-register:
+    <<: *spark
+    restart: "no"
+    entrypoint: [python3, /app/analytics/sql/register.py]
+    depends_on:
+      spark-sql: {condition: service_healthy}
+
+  airflow-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow-local
+    volumes: [airflow-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  airflow-init:
+    <<: *airflow
+    restart: "no"
+    user: "0:0"
+    depends_on:
+      airflow-db: {condition: service_healthy}
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: "${AIRFLOW_ADMIN_USER:-admin}"
+      _AIRFLOW_WWW_USER_PASSWORD: "${AIRFLOW_ADMIN_PASSWORD:-admin-demo}"
+    command: [bash, -c, "mkdir -p /app/alert-spool && chmod 777 /app/alert-spool && airflow version"]
+
+  airflow-webserver:
+    <<: *airflow
+    command: [webserver]
+    ports: ["${AIRFLOW_UI_PORT:-8084}:8080"]
+
+  airflow-scheduler:
+    <<: *airflow
+    command: [scheduler]
+    depends_on:
+      airflow-init: {condition: service_completed_successfully}
+      analytics-register: {condition: service_completed_successfully}
+
+  airflow-triggerer:
+    <<: *airflow
+    command: [triggerer]
+
+  metabase:
+    image: metabase/metabase:v0.52.9
+    restart: unless-stopped
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+      JAVA_OPTS: -Xmx512m
+    volumes: [metabase-data:/metabase-data]
+    ports: ["${METABASE_PORT:-3000}:3000"]
+
+  metabase-bootstrap:
+    image: python:3.12-slim
+    restart: "no"
+    volumes: [../metabase:/app/metabase:ro]
+    entrypoint: [python, /app/metabase/bootstrap.py]
+    environment:
+      METABASE_URL: http://metabase:3000
+      METABASE_ADMIN_EMAIL: "${METABASE_ADMIN_EMAIL:-demo@tikblog.local}"
+      METABASE_ADMIN_PASSWORD: "${METABASE_ADMIN_PASSWORD:-Tikblog-demo-2026!}"
+      SPARK_SQL_HOST: spark-sql
+    depends_on:
+      metabase: {condition: service_started}
+      analytics-register: {condition: service_completed_successfully}
+
+volumes:
+  spark-ivy:
+  spark-metastore:
+  airflow-db:
+  airflow-logs:
+  alert-spool:
+  metabase-data:

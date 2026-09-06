@@ -1,0 +1,114 @@
+{
+  "Management": [
+    {
+      "name": "Unsubscribe requests received",
+      "file": "total.sql",
+      "display": "scalar"
+    },
+    {
+      "name": "Daily requests by source",
+      "file": "daily.sql",
+      "display": "line",
+      "settings": {
+        "graph.dimensions": [
+          "event_date",
+          "source"
+        ],
+        "graph.metrics": [
+          "unsubscribe_count"
+        ]
+      }
+    },
+    {
+      "name": "Requests by source",
+      "file": "sources.sql",
+      "display": "bar",
+      "settings": {
+        "graph.dimensions": [
+          "source"
+        ],
+        "graph.metrics": [
+          "unsubscribe_count"
+        ]
+      }
+    },
+    {
+      "name": "Daily unique readers and writers",
+      "file": "unique.sql",
+      "description": "Exact distinct readers and writers per event date and source. Daily/source uniques are not additive; no period-wide unique total is implied."
+    }
+  ],
+  "Data Quality": [
+    {
+      "name": "Overall latest DQ status",
+      "file": "dq_status.sql",
+      "status_column": "status"
+    },
+    {
+      "name": "Latest status by check, source and layer",
+      "file": "dq_latest.sql",
+      "status_column": "status"
+    },
+    {
+      "name": "Latest failures by source and layer",
+      "file": "dq_breakdown.sql",
+      "description": "Failed check-row pairs, not distinct rejected events. One invalid row can fail several checks."
+    },
+    {
+      "name": "Failed check rows over time",
+      "file": "dq_history.sql",
+      "display": "line",
+      "settings": {
+        "graph.dimensions": [
+          "check_hour",
+          "source"
+        ],
+        "graph.metrics": [
+          "failed_check_rows"
+        ]
+      },
+      "description": "Failed check-row pairs by hour, not distinct rejected events."
+    },
+    {
+      "name": "Technical duplicates",
+      "file": "duplicates.sql",
+      "status_column": "status"
+    },
+    {
+      "name": "Quarantined requests",
+      "file": "quarantine.sql"
+    }
+  ],
+  "Pipeline Health": [
+    {
+      "name": "Latest pipeline status",
+      "file": "health_status.sql",
+      "status_column": "status"
+    },
+    {
+      "name": "E2E and processing latency by source",
+      "file": "latency.sql",
+      "status_column": "status"
+    },
+    {
+      "name": "Kafka lag and partitions",
+      "file": "lag.sql",
+      "status_column": "status"
+    },
+    {
+      "name": "Spark duration and executors",
+      "file": "spark.sql",
+      "status_column": "status"
+    },
+    {
+      "name": "Gold freshness",
+      "file": "freshness.sql",
+      "status_column": "status"
+    },
+    {
+      "name": "Latest alert stubs",
+      "file": "alerts.sql",
+      "status_column": "severity"
+    }
+  ]
+}
