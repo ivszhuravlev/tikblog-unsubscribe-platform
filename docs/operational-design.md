@@ -187,6 +187,10 @@ The DLQ producer writes the original bytes verbatim, with the reason in the
 headers. A message that failed *because* it does not match the schema has to land
 there too, and an encoder would reject it a second time.
 
+TBD: strengthen DLQ publication confirmation so the source Kafka offset is committed
+only after DLQ delivery is positively confirmed. The current design intent is correct,
+but this failure edge should be hardened before production use.
+
 **The known gap.** Bounded retries protect the queue from one bad message; they
 do not protect it from a downstream that is down for everyone. With a total
 outage, every event in the topic is parked in about a second and a half each, and

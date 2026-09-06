@@ -1,7 +1,6 @@
 # Analytics Plane — Design
 
-This document captures the detailed design of the analytics plane before
-implementation.
+This document captures the detailed design of the implemented analytics plane.
 
 The operational plane applies unsubscribes. This plane turns the same events
 into reportable data: a management dashboard and ad-hoc historical analysis.
@@ -25,11 +24,11 @@ job's runtime.
 
 ## 2. Storage and engines
 
-Object storage is the MinIO instance the operational plane already uses, under a
-separate analytics prefix:
+Object storage is the MinIO instance the operational plane already uses, in a
+separate `tikblog-analytics` bucket:
 
 ```text
-analytics/
+tikblog-analytics/
   bronze/
   silver/
   gold/
@@ -162,8 +161,8 @@ plain OSS stack there is nothing to maintain it automatically. Refreshed every
 
 **The refresh is incremental, not a full rebuild.** The job finds the
 `event_date` values touched by new Silver rows, recalculates the
-`(event_date, source)` aggregates for those dates from Silver, and `MERGE`s the
-result into Gold. This matters for Legal in particular: a batch arriving today
+`(event_date, source)` aggregates for those dates from Silver, and overwrites the
+touched Gold partitions using Delta `replaceWhere`. This matters for Legal in particular: a batch arriving today
 can carry a `requested_at` from last week, so the affected date is not
 necessarily today. Partitioned by `event_date`; clustered on whatever
 dimensions the dashboard actually filters by, not on everything.
@@ -221,8 +220,9 @@ Reported per source:
   Legal is naturally much slower and is read separately;
 - **processing latency**, `silver_processed_at - bronze_ingested_at`, which shows
   whether processing itself is the bottleneck;
-- **Kafka lag** for the analytics consumer groups; Legal lag reads differently,
-  because its processing is event-driven;
+- **Kafka lag** for priority analytics, measured from Spark checkpoint/progress
+  offsets against the latest Kafka offsets, not Kafka consumer-group committed
+  offsets; Legal lag reads differently because its processing is event-driven;
 - **Spark**: microbatch processing time, executor count;
 - **Kafka partition count** as diagnostic context for throughput and lag, not as
   a business metric.
@@ -268,7 +268,7 @@ nothing extra to build.
 **Priority streaming** is a long-running Spark job, not a scheduled DAG. It is
 not restarted every five minutes.
 
-**Legal DAG** — a deferrable `AwaitMessageSensor` from the Kafka provider, so
+**Legal DAG** — the custom deferrable `LegalOffsetsSensor`, so
 waiting releases the worker instead of occupying it. This requires the Airflow
 `triggerer` to be running. New Legal offsets wake the DAG: Kafka → Bronze Legal →
 Silver, then compute stops.

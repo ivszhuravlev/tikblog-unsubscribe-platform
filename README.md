@@ -129,6 +129,36 @@ schema evolution:** [`docs/analytics-design.md`](docs/analytics-design.md)
 
 Everything below runs from the repository root, in an ordinary terminal.
 
+### Fresh demo start
+
+For a fresh demo, run the following sequence. The reset deletes existing local data.
+
+```bash
+./tools/reset_local.sh
+
+UI_EVENTS_PER_SECOND=10 docker compose \
+  -f infra/docker-compose.yml \
+  -f infra/docker-compose.analytics.yml \
+  up -d --wait
+
+uv run python tools/generate_legal_batch.py --rows 500 --broken-share 0
+
+docker compose \
+  -f infra/docker-compose.yml \
+  -f infra/docker-compose.analytics.yml \
+  --profile jobs run --rm legal-ingestion
+```
+
+Wait up to approximately 5 minutes for the scheduled Gold refresh.
+
+- Metabase: http://localhost:3000 — `demo@tikblog.local` / `Tikblog-demo-2026!`
+- Airflow: http://localhost:8084 — `admin` / `admin-demo`
+- Spark Structured Streaming UI: http://localhost:4041
+- Kafka UI: http://localhost:8082
+- MinIO: http://localhost:9001
+
+No-login Metabase dashboard URLs are printed by `metabase-bootstrap`.
+
 ### 1. Start the infrastructure
 
 ```bash
