@@ -12,7 +12,7 @@ with DAG(
     "analytics_gold_refresh",
     schedule=settings()["gold_schedule"],
     start_date=pendulum.parse(os.environ.get("ANALYTICS_START_DATE", "2026-09-05T00:00:00Z")),
-    catchup=True,
+    catchup=False,
     max_active_runs=1,
     default_args={
         "retries": 2,

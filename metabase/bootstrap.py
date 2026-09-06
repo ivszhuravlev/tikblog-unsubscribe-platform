@@ -7,6 +7,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 BASE = os.environ.get('METABASE_URL', 'http://localhost:3000').rstrip('/')
+# Browser-facing origin; BASE can be the internal Compose service address.
+PUBLIC_BASE = os.environ.get('METABASE_PUBLIC_URL', 'http://localhost:3000').rstrip('/')
 EMAIL = os.environ.get('METABASE_ADMIN_EMAIL', 'demo@tikblog.local')
 PASSWORD = os.environ.get('METABASE_ADMIN_PASSWORD', 'Tikblog-demo-2026!')
 TOKEN = None
@@ -36,7 +38,7 @@ def ensure_connection():
               'details': {'host': os.environ.get('SPARK_SQL_HOST', 'spark-sql'),
                           'port': int(os.environ.get('SPARK_SQL_PORT', '10000')),
                           'dbname': 'default', 'user': 'analytics', 'password': '',
-                          'jdbc-flags': ';auth=noSasl'}}
+                          'jdbc-flags': ''}}
     if existing:
         api('PUT', f'/database/{existing["id"]}', config)
         return existing['id']
@@ -47,6 +49,7 @@ def provision(database_id):
     spec = json.loads((ROOT / 'dashboards.json').read_text())
     dashboards = api('GET', '/dashboard')
     cards = api('GET', '/card')
+    public_links = []
     for title, queries in spec.items():
         dashboard = next((d for d in dashboards if d['name'] == title and not d.get('archived')), None)
         if dashboard is None:
@@ -73,7 +76,7 @@ def provision(database_id):
                     for status, color in (('GREEN', '#84BB4C'), ('YELLOW', '#F9CF48'),
                                           ('RED', '#ED6E6E'), ('UNKNOWN', '#949AAB'))]
             body = {'name': name, 'dataset_query': query, 'display': item.get('display', 'table'),
-                    'description': item.get('description', ''), 'visualization_settings': settings}
+                    'description': item.get('description'), 'visualization_settings': settings}
             existing = next((c for c in cards if c['name'] == name and not c.get('archived')), None)
             card = api('PUT', f'/card/{existing["id"]}', body) if existing else api('POST', '/card', body)
             placements.append({'id': existing_placements.get(card['id'], -(position+1)), 'card_id': card['id'],
@@ -90,7 +93,12 @@ def provision(database_id):
                        'a recorded GREEN does not prove that a stopped pipeline is still healthy.')
         api('PUT', f'/dashboard/{dashboard["id"]}', {
             'name': title, 'description': description, 'parameters': params, 'dashcards': placements})
-        print(f'{title}: {BASE}/dashboard/{dashboard["id"]}')
+        public_uuid = current.get('public_uuid')
+        if not public_uuid:
+            public_uuid = api('POST', f'/dashboard/{dashboard["id"]}/public_link')['uuid']
+        public_links.append((title, public_uuid))
+    for title, public_uuid in public_links:
+        print(f'{title}: {PUBLIC_BASE}/public/dashboard/{public_uuid}')
 
 
 def main():
@@ -104,11 +112,12 @@ def main():
                 raise
             time.sleep(5)
     setup = properties.get('setup-token')
-    if setup:
+    if setup and not properties.get('has-user-setup'):
         api('POST', '/setup', {'token': setup, 'prefs': {'site_name': 'TikBlog',
             'allow_tracking': False}, 'user': {'first_name': 'Demo', 'last_name': 'User',
             'email': EMAIL, 'password': PASSWORD}})
     TOKEN = api('POST', '/session', {'username': EMAIL, 'password': PASSWORD})['id']
+    api('PUT', '/setting/enable-public-sharing', {'value': True})
     provision(ensure_connection())
 
 

@@ -170,7 +170,10 @@ scrolls past faster than you can read it.
 ### 4. Start the analytics stack
 
 ```bash
-docker compose -f infra/docker-compose.analytics.yml up -d --wait
+docker compose \
+  -f infra/docker-compose.yml \
+  -f infra/docker-compose.analytics.yml \
+  up -d --wait
 ```
 
 This brings up Spark (master, workers, the long-running driver and a Spark SQL
@@ -183,8 +186,10 @@ refresh, housekeeping and backfill.
 ### 5. Stop
 
 ```bash
-docker compose -f infra/docker-compose.analytics.yml down --remove-orphans
-docker compose -f infra/docker-compose.yml down --remove-orphans
+docker compose \
+  -f infra/docker-compose.yml \
+  -f infra/docker-compose.analytics.yml \
+  down --remove-orphans
 ```
 
 Add `-v` to also drop the volumes and start from an empty cluster next time.
