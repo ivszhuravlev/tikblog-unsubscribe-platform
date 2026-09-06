@@ -136,8 +136,9 @@ docker compose -f infra/docker-compose.yml up -d --wait \
   kafka kafka-2 kafka-3 schema-registry postgres minio
 ```
 
-This also runs two one-shot containers that exit when done: `minio-init` creates
-the bucket, `db-migrate` applies the database schema.
+The one-shot `db-migrate` applies the database schema when UnsubscribeMe starts
+in step 3. `minio-init` creates the Legal bucket with the full stack in step 4,
+or when running Legal ingestion.
 
 ### 2. Create the topics
 
@@ -205,7 +206,8 @@ Add `-v` to also drop the volumes and start from an empty cluster next time.
 | Registered schemas | http://localhost:8081/subjects |
 | Operational state | Postgres on `localhost:5432`, database `tikblog` |
 | Service logs | `docker compose -f infra/docker-compose.yml logs -f <service>` |
-| Dashboards: management, data quality, pipeline health | Metabase — http://localhost:3000 |
+| Metabase application (login required) | http://localhost:3000 — `demo@tikblog.local` / `Tikblog-demo-2026!` |
+| Demo dashboards (no login) | `/public/dashboard/<uuid>` URLs printed by `metabase-bootstrap` |
 | DAG runs, the deferred Legal sensor, task failures | Airflow UI — http://localhost:8084 |
 | Streaming queries, stages, executors | Spark master UI — http://localhost:8083, driver UI — http://localhost:4041 |
 | Ad-hoc SQL over Bronze, Silver, Gold and monitoring tables | Spark SQL (Thrift) on `localhost:10000` |
@@ -414,10 +416,22 @@ the Gold refresh runs every five minutes; housekeeping is daily and can be
 triggered by hand; backfill takes `layer`, `from_date` and `to_date` as
 parameters.
 
-In Metabase (http://localhost:3000) the three dashboards are already provisioned:
+The Metabase application at http://localhost:3000 requires login with
+`demo@tikblog.local` / `Tikblog-demo-2026!`. The three dashboards are provisioned:
 management activity from Gold, data quality from the monitoring tables, and
 pipeline health with end-to-end and processing latency, Kafka lag, microbatch
 duration and Gold freshness, each with a green / yellow / red status.
+
+For the no-login demo, open the `/public/dashboard/<uuid>` URLs printed by
+`metabase-bootstrap` for Management, Data Quality and Pipeline Health. Retrieve
+them from the bootstrap logs:
+
+```bash
+docker compose \
+  -f infra/docker-compose.yml \
+  -f infra/docker-compose.analytics.yml \
+  logs metabase-bootstrap
+```
 
 ### 10. Prove late data is handled
 
@@ -489,9 +503,9 @@ docs/                     design documents and decisions
 The local stack is an executable model of the design, not a production
 deployment. Single-host brokers, plaintext listeners, passwords in Compose
 defaults, and a stub standing in for a third-party service are all conscious
-simplifications. There are no automated tests.
+simplifications.
 
-Four boundaries are drawn on purpose:
+Key boundaries are drawn on purpose:
 
 - **The event contract for UI and Customer Success is assumed.** Those services
   are expected to emit the canonical event; the schema registry enforces its
